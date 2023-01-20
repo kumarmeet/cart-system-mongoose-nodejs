@@ -114,8 +114,15 @@ const getCart = async (req, res, next) => {
         updatedAt: 0,
         "items.createdAt": 0,
         "items.updatedAt": 0,
+        __v: 0,
       }
-    ).populate("items.productId", { createdAt: 0, updatedAt: 0 });
+    ).populate("items.productId userId", {
+      createdAt: 0,
+      updatedAt: 0,
+      addresses: 0,
+      password: 0,
+      __v: 0,
+    });
 
     if (!cart) {
       return res.status(400).json({
@@ -169,28 +176,79 @@ const removeCartItem = async (req, res, next) => {
     let cart = await Cart.findOne();
 
     const indexFound = cart.items.findIndex(
-      (item) => item.productId._id == req.body.productId
+      (item) => item.productId.toString() === req.body.productId
     );
 
     const removedItem = cart.items.splice(indexFound, 1);
 
-    const product = await Cart.findOneAndUpdate(
-      { _id: req.body.cartId },
-      {
-        $pull: {
-          items: { productId: req.body.productId },
+    if (indexFound === -1) {
+      res.status(200).json({
+        status: false,
+        message: "This cart item has been already removed",
+      });
+    }
+
+    if (indexFound !== -1) {
+      product = await Cart.findOneAndUpdate(
+        { _id: req.body.cartId },
+        {
+          $pull: {
+            items: { productId: req.body.productId },
+          },
+          $set: {
+            subTotal: (cart.subTotal - removedItem[0].total).toFixed(2),
+          },
         },
-        $set: {
-          subTotal: (cart.subTotal - removedItem[0].total).toFixed(2),
-        },
-      },
-      { new: true, useFindAndModify: false }
-    );
+        { new: true, useFindAndModify: false }
+      );
+    }
 
     res.status(200).json({
       status: true,
       message: "Cart item has been removed",
-      product,
+      // product,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateCartQuantity = async (req, res, next) => {
+  try {
+    const quantity = Number.parseInt(req.body.quantity);
+    const productId = req.body.productId;
+
+    if (quantity !== -1 && quantity !== 1) {
+      return res.status(200).json({
+        status: true,
+        message: "Cart quantity only increment by 1 or -1",
+      });
+    }
+
+    let cart = await Cart.findOne();
+    let productDetails = await Meal.findById(productId);
+
+    const indexFound = cart.items.findIndex(
+      (item) => item.productId._id == productId
+    );
+
+    if (indexFound !== -1) {
+      cart.items[indexFound].quantity =
+        cart.items[indexFound].quantity + quantity;
+      cart.items[indexFound].total =
+        cart.items[indexFound].quantity * productDetails.priceWithOffer;
+      cart.items[indexFound].price = productDetails.priceWithOffer;
+      cart.subTotal = cart.items
+        .map((item) => item.total)
+        .reduce((acc, next) => (acc + next).toFixed(2));
+    }
+
+    const data = await cart.save();
+
+    return res.status(200).json({
+      status: true,
+      message: "Cart item has been updated",
+      data,
     });
   } catch (error) {
     next(error);
@@ -203,4 +261,5 @@ module.exports = {
   emptyCart,
   deleteCart,
   removeCartItem,
+  updateCartQuantity,
 };
